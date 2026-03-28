@@ -628,8 +628,8 @@ input:focus, select:focus { border-color: var(--prim); }
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
     <h2 style="font-family:'Oswald',sans-serif;font-size:1rem;flex:1">📋 Mis apuestas guardadas</h2>
     <button class="btn btn-g" style="font-size:.8rem;padding:8px 12px" onclick="window.print()">🖨️ Imprimir</button>
-    <button class="btn btn-g" style="font-size:.8rem;padding:8px 12px" onclick="exportJSON()">⬇ JSON</button>
-    <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px">⬆ Importar<input type="file" accept=".json" onchange="importJSON(event)" style="display:none"></label>
+    <button class="btn btn-g" style="font-size:.8rem;padding:8px 12px" onclick="exportJSON()">💾 Backup</button>
+    <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px">📂 Restaurar<input type="file" accept=".json" onchange="importJSON(event)" style="display:none"></label>
     <button class="btn btn-danger" onclick="clearAll()">🗑</button>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
@@ -1351,9 +1351,23 @@ function renderStats(){
 // EXPORT / IMPORT
 // ============================================================
 function exportJSON(){
-  const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='backup_loteria.json';a.click();
-  toast('JSON exportado');
+  const fecha=new Date().toISOString().slice(0,10);
+  const payload={
+    version:1,
+    exportado:new Date().toISOString(),
+    nota:'Backup apuestas lotería — importar en comprobador_loteria.html',
+    combsPrim:state.combsPrim||[],
+    combsEuro:state.combsEuro||[],
+    extraPrim:state.extraPrim||[],
+    extraEuro:state.extraEuro||[]
+  };
+  const b=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  a.download='backup_loteria_'+fecha+'.json';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  toast('✅ Backup descargado — guárdalo en un lugar seguro');
 }
 function importJSON(evt){
   const f=evt.target.files[0];if(!f)return;
