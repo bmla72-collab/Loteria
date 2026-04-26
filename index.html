@@ -674,7 +674,6 @@ input:focus, select:focus { border-color: var(--prim); }
           <div class="manual-hint">2 estrellas (o 3 si es múltiple)</div>
           <div class="num-preview" id="en-manual-s-preview"></div>
         </div>
-        </div>
       </div>
       <div class="btn-row">
         <button class="btn btn-e" onclick="addEuroComb()">+ Guardar apuesta</button>
@@ -747,6 +746,13 @@ input:focus, select:focus { border-color: var(--prim); }
 
 <!-- ===== TAB HISTÓRICO ===== -->
 <div id="tab-histsorteos" class="container" style="display:none">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+    <h2 style="font-family:'Oswald',sans-serif;font-size:1rem;flex:1">🗓️ Histórico de sorteos</h2>
+    <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px" title="Importar sorteos desde CSV">📥 Importar
+      <input type="file" accept=".csv,.json" onchange="importHistorico(event)" style="display:none">
+    </label>
+    <button class="btn btn-danger" style="font-size:.8rem;padding:8px 13px" onclick="clearHistorico()" title="Borrar sorteos añadidos manualmente">🗑 Borrar histórico</button>
+  </div>
   <div class="filter-bar">
     <div class="field-group" style="min-width:150px">
       <label>Juego</label>
@@ -762,6 +768,29 @@ input:focus, select:focus { border-color: var(--prim); }
   </div>
   <div style="font-size:.78rem;color:var(--dim);margin-bottom:10px" id="hs-count"></div>
   <div class="table-wrap" id="hs-wrap"></div>
+</div>
+
+<!-- MODAL IMPORTAR HISTÓRICO -->
+<div class="modal-overlay" id="import-hist-modal" onclick="if(event.target===this)closeImportModal()">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-title" id="import-hist-title">📥 Importar histórico</div>
+    <div id="import-hist-body" style="margin-top:12px;font-size:.88rem;color:var(--muted)"></div>
+    <div id="import-hist-conflict" style="margin-top:10px;display:none">
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px;font-size:.84rem">
+        <strong id="import-conflict-fecha" style="color:var(--prim)"></strong>
+        <div id="import-conflict-detail" style="margin-top:6px;color:var(--muted)"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-p" style="flex:1" onclick="resolveImportConflict('overwrite')">Sobrescribir</button>
+        <button class="btn btn-g" style="flex:1" onclick="resolveImportConflict('skip')">Saltar</button>
+        <button class="btn btn-g" style="flex:1" onclick="resolveImportConflict('all-overwrite')">Sobrescribir todo</button>
+        <button class="btn btn-g" style="flex:1" onclick="resolveImportConflict('all-skip')">Saltar todos</button>
+      </div>
+    </div>
+    <div id="import-hist-actions" style="margin-top:12px;display:none">
+      <button class="btn btn-g" style="width:100%" onclick="closeImportModal()">Cerrar</button>
+    </div>
+  </div>
 </div>
 
 <!-- ===== TAB STATS ===== -->
@@ -849,7 +878,7 @@ async function loadState(password){
   try{stored=JSON.parse(emb);}catch(e){}
   if(!stored||stored.v!==2||!stored.configured||!stored.data){
     // Fresh / unencrypted file — start blank
-    return {combsPrim:[],combsEuro:[],extraPrim:[],extraEuro:[]};
+    return {combsPrim:[],combsEuro:[],extraPrim:[],extraEuro:[],allPrim:[...DB_PRIM],allEuro:[...DB_EURO]};
   }
   const obj=await decryptData(password,stored);
   return obj; // null if wrong password
@@ -1157,7 +1186,8 @@ function addPrimResult(){
   if(!fecha){toast('Indica la fecha','err');return;}
   if(nums.length!==6){toast('Necesitas exactamente 6 números','err');return;}
   if(getAllPrim().find(x=>x.fecha===fecha)){toast('Ya existe ese sorteo','err');return;}
-  state.extraPrim.push({fecha,numeros:nums.sort((a,b)=>a-b),complementario:comp||null,reintegro:isNaN(reint)?null:reint});
+  if(!state.allPrim)state.allPrim=[];
+  state.allPrim.push({fecha,numeros:nums.sort((a,b)=>a-b),complementario:comp||null,reintegro:isNaN(reint)?null:reint});
   saveLS();updateKPIs();refreshPrimQuick();
   ['pr-fecha','pr-nums','pr-comp','pr-reint'].forEach(id=>document.getElementById(id).value='');
   toast('✅ Resultado añadido');
@@ -1171,7 +1201,8 @@ function addEuroResult(){
   if(nums.length!==5){toast('Necesitas 5 números','err');return;}
   if(ests.length!==2){toast('Necesitas 2 estrellas','err');return;}
   if(getAllEuro().find(x=>x.fecha===fecha)){toast('Ya existe ese sorteo','err');return;}
-  state.extraEuro.push({fecha,numeros:nums.sort((a,b)=>a-b),estrellas:ests.sort((a,b)=>a-b)});
+  if(!state.allEuro)state.allEuro=[];
+  state.allEuro.push({fecha,numeros:nums.sort((a,b)=>a-b),estrellas:ests.sort((a,b)=>a-b)});
   saveLS();updateKPIs();refreshEuroQuick();
   ['er-fecha','er-nums','er-ests'].forEach(id=>document.getElementById(id).value='');
   toast('✅ Resultado añadido');
@@ -1180,8 +1211,8 @@ function addEuroResult(){
 // ============================================================
 // MERGE DB
 // ============================================================
-function getAllPrim(){return [...DB_PRIM,...(state.extraPrim||[])].sort((a,b)=>b.fecha.localeCompare(a.fecha));}
-function getAllEuro(){return [...DB_EURO,...(state.extraEuro||[])].sort((a,b)=>b.fecha.localeCompare(a.fecha));}
+function getAllPrim(){return (state.allPrim||[]).sort((a,b)=>b.fecha.localeCompare(a.fecha));}
+function getAllEuro(){return (state.allEuro||[]).sort((a,b)=>b.fecha.localeCompare(a.fecha));}
 
 // ============================================================
 // PRIZE LOGIC
@@ -1444,7 +1475,6 @@ function renderHS(){
   const hasMy=isPrim?state.combsPrim.length>0:state.combsEuro.length>0;
   let rows='';
   page.forEach(dr=>{
-    const isEx=(isPrim?state.extraPrim:state.extraEuro).find(x=>x.fecha===dr.fecha);
     const myCols=hasMy?(isPrim?state.combsPrim:state.combsEuro).map(c=>{
       const r=isPrim?primPrize(c,dr):euroPrize(c,dr);
       return r.cat>0?`<span class="prize ${pcls(r.cat)}" title="${c.name}" style="margin:1px">${r.label}</span>`:'';
@@ -1454,7 +1484,7 @@ function renderHS(){
       ?(dr.complementario!=null?`<div class="mb pc" style="width:22px;height:22px">${dr.complementario}</div>`:'')
        +(dr.reintegro!=null?`<div class="mb pr" style="width:22px;height:22px">${dr.reintegro}</div>`:'')
       :`<span style="font-size:.62rem;color:var(--dim);padding:0 2px">★</span>${mbsH(dr.estrellas,'es')}`;
-    rows+=`<tr${isEx?' class="highlight"':''}><td style="font-size:.75rem;color:var(--muted);white-space:nowrap">${dr.fecha}${isEx?` <button onclick="openEditResult('${j}','${dr.fecha}')" style="background:transparent;border:none;cursor:pointer;font-size:.8rem;padding:0 2px" title="Editar">✏️</button>`:''}</td><td><div class="mbs">${numsH}${extraH}</div></td>${hasMy?`<td style="font-size:.75rem">${myCols||'—'}</td>`:''}</tr>`;
+    rows+=`<tr><td style="font-size:.75rem;color:var(--muted);white-space:nowrap">${dr.fecha} <button onclick="openEditResult('${j}','${dr.fecha}')" style="background:transparent;border:none;cursor:pointer;font-size:.8rem;padding:0 2px" title="Editar">✏️</button></td><td><div class="mbs">${numsH}${extraH}</div></td>${hasMy?`<td style="font-size:.75rem">${myCols||'—'}</td>`:''}</tr>`;
   });
   const th=`<tr><th>Fecha</th><th>${isPrim?'Números + C + R':'Números + ★'}</th>${hasMy?'<th>Mis apuestas</th>':''}</tr>`;
   let html=`<table class="rtable"><thead>${th}</thead><tbody>${rows}</tbody></table>`;
@@ -1462,7 +1492,7 @@ function renderHS(){
   document.getElementById('hs-wrap').innerHTML=html;
 }
 function openEditResult(type, fecha){
-  const arr=type==='prim'?state.extraPrim:state.extraEuro;
+  const arr=type==='prim'?(state.allPrim||[]):(state.allEuro||[]);
   const item=arr.find(x=>x.fecha===fecha);
   if(!item){toast('Resultado no encontrado','err');return;}
   document.getElementById('er-edit-fecha-orig').value=fecha;
@@ -1495,7 +1525,7 @@ async function saveEditResult(){
   if(!fechaNueva){toast('Indica la fecha','err');return;}
   if(isPrim&&nums.length!==6){toast('Necesitas 6 números','err');return;}
   if(!isPrim&&nums.length!==5){toast('Necesitas 5 números','err');return;}
-  const arr=isPrim?state.extraPrim:state.extraEuro;
+  const arr=isPrim?(state.allPrim||[]):(state.allEuro||[]);
   const idx=arr.findIndex(x=>x.fecha===fechaOrig);
   if(idx<0){toast('No encontrado','err');return;}
   if(isPrim){
@@ -1516,8 +1546,8 @@ async function deleteExtraResult(){
   if(!confirm('¿Borrar este resultado?'))return;
   const type=document.getElementById('er-edit-type').value;
   const fecha=document.getElementById('er-edit-fecha-orig').value;
-  if(type==='prim') state.extraPrim=state.extraPrim.filter(x=>x.fecha!==fecha);
-  else state.extraEuro=state.extraEuro.filter(x=>x.fecha!==fecha);
+  if(type==='prim') state.allPrim=(state.allPrim||[]).filter(x=>x.fecha!==fecha);
+  else state.allEuro=(state.allEuro||[]).filter(x=>x.fecha!==fecha);
   await saveLS();
   refreshPrimQuick();refreshEuroQuick();renderHS();
   document.getElementById('edit-result-modal').classList.remove('show');
@@ -1634,7 +1664,9 @@ function exportJSON(){
     combsPrim:state.combsPrim||[],
     combsEuro:state.combsEuro||[],
     extraPrim:state.extraPrim||[],
-    extraEuro:state.extraEuro||[]
+    extraEuro:state.extraEuro||[],
+    allPrim:state.allPrim||[],
+    allEuro:state.allEuro||[]
   };
   const b=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const a=document.createElement('a');
@@ -1654,6 +1686,10 @@ function importJSON(evt){
       if(d.combsEuro)state.combsEuro=d.combsEuro;
       if(d.extraPrim)state.extraPrim=d.extraPrim;
       if(d.extraEuro)state.extraEuro=d.extraEuro;
+      if(d.allPrim)state.allPrim=d.allPrim;
+      if(d.allEuro)state.allEuro=d.allEuro;
+      if(!state.allPrim)state.allPrim=[...DB_PRIM,...(state.extraPrim||[]),...(state.allPrim||[]).filter(x=>!DB_PRIM.find(d=>d.fecha===x.fecha))].filter((v,i,a)=>a.findIndex(t=>t.fecha===v.fecha)===i);
+      if(!state.allEuro)state.allEuro=[...DB_EURO,...(state.extraEuro||[]),...(state.allEuro||[]).filter(x=>!DB_EURO.find(d=>d.fecha===x.fecha))].filter((v,i,a)=>a.findIndex(t=>t.fecha===v.fecha)===i);
       saveLS();updateKPIs();refreshPrimQuick();refreshEuroQuick();
       toast('✅ Importado — pulsa 💾 para guardar en el archivo');
     }catch(e){toast('Error leyendo JSON','err');}
@@ -1785,6 +1821,9 @@ async function lockSubmit(){
   if(obj){
     _sessionKey=pw;
     state=obj;
+    // Migrate: if saved state doesn't have allPrim yet, merge DB + extra
+    if(!state.allPrim)state.allPrim=[...DB_PRIM,...(state.extraPrim||[]),...(state.allPrim||[]).filter(x=>!DB_PRIM.find(d=>d.fecha===x.fecha))].filter((v,i,a)=>a.findIndex(t=>t.fecha===v.fecha)===i);
+    if(!state.allEuro)state.allEuro=[...DB_EURO,...(state.extraEuro||[]),...(state.allEuro||[]).filter(x=>!DB_EURO.find(d=>d.fecha===x.fecha))].filter((v,i,a)=>a.findIndex(t=>t.fecha===v.fecha)===i);
     unlockApp();
   } else {
     errEl.textContent='Contraseña incorrecta';
@@ -2095,11 +2134,11 @@ function exportCSV(){
     csv+=`Euromillones,"${c.name||''}","${c.numeros.join(',')}","E:${(c.estrellas||[]).join(',')}",${c.fecha||''}\n`;
   });
   csv+='\nSOTEOS_EXTRA_PRIMITIVA\nFECHA,NUMEROS,COMPLEMENTARIO,REINTEGRO\n';
-  (state.extraPrim||[]).forEach(d=>{
+  (state.allPrim||[]).forEach(d=>{
     csv+=`${d.fecha},"${d.numeros.join(',')}",${d.complementario??''},${d.reintegro??''}\n`;
   });
   csv+='\nSOTEOS_EXTRA_EUROMILLONES\nFECHA,NUMEROS,ESTRELLAS\n';
-  (state.extraEuro||[]).forEach(d=>{
+  (state.allEuro||[]).forEach(d=>{
     csv+=`${d.fecha},"${d.numeros.join(',')}","${(d.estrellas||[]).join(',')}"\n`;
   });
   const b=new Blob([csv],{type:'text/csv;charset=utf-8'});
@@ -2145,14 +2184,16 @@ function importCSV(evt){
           const fecha=clean[0],nums=clean[1].split(',').map(Number).filter(n=>n>0);
           const comp=parseInt(clean[2])||null,reint=parseInt(clean[3]);
           if(nums.length===6&&!getAllPrim().find(x=>x.fecha===fecha)){
-            state.extraPrim.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
+            if(!state.allPrim)state.allPrim=[];
+            state.allPrim.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
             imported++;
           }
         } else if(section==='extraEuro'&&clean.length>=2){
           const fecha=clean[0],nums=clean[1].split(',').map(Number).filter(n=>n>0);
           const ests=(clean[2]||'').split(',').map(Number).filter(n=>n>0);
           if(nums.length===5&&!getAllEuro().find(x=>x.fecha===fecha)){
-            state.extraEuro.push({fecha,numeros:nums,estrellas:ests});
+            if(!state.allEuro)state.allEuro=[];
+            state.allEuro.push({fecha,numeros:nums,estrellas:ests});
             imported++;
           }
         }
@@ -2171,7 +2212,7 @@ function importCSV(evt){
 let _editType='', _editIdx=-1;
 function showEditModal(type, idx){
   _editType=type; _editIdx=idx;
-  const arr=type==='prim'?state.extraPrim:state.extraEuro;
+  const arr=type==='prim'?(state.allPrim||[]):(state.allEuro||[]);
   const d=arr[idx];
   if(!d)return;
   document.getElementById('edit-modal-title').textContent=type==='prim'?'✏️ Editar resultado Primitiva':'✏️ Editar resultado Euromillones';
@@ -2197,7 +2238,7 @@ function hideEditModal(e){
     document.getElementById('edit-modal').classList.remove('show');
 }
 function saveEditResult(){
-  const arr=_editType==='prim'?state.extraPrim:state.extraEuro;
+  const arr=_editType==='prim'?(state.allPrim||[]):(state.allEuro||[]);
   if(_editIdx<0||_editIdx>=arr.length)return;
   const fecha=document.getElementById('edit-fecha').value;
   const nums=parseNums(document.getElementById('edit-nums').value);
@@ -2219,12 +2260,149 @@ function saveEditResult(){
 }
 function deleteEditResult(){
   if(!confirm('¿Borrar este resultado?'))return;
-  if(_editType==='prim') state.extraPrim.splice(_editIdx,1);
-  else state.extraEuro.splice(_editIdx,1);
+  if(_editType==='prim')(state.allPrim||[]).splice(_editIdx,1);
+  else(state.allEuro||[]).splice(_editIdx,1);
   saveLS();updateKPIs();refreshPrimQuick();refreshEuroQuick();
   document.getElementById('edit-modal').classList.remove('show');
   toast('Resultado eliminado');
 }
+
+// ============================================================
+// BORRAR E IMPORTAR HISTÓRICO
+// ============================================================
+async function clearHistorico(){
+  const j=document.getElementById('hs-juego').value;
+  const tipo=j==='prim'?'Primitiva':'Euromillones';
+  const n=j==='prim'?(state.allPrim||[]).length:(state.allEuro||[]).length;
+  if(n===0){toast('No tienes sorteos añadidos manualmente (el histórico integrado no se puede borrar)','err');return;}
+  if(!confirm(`¿Borrar los ${n} sorteos de ${tipo} añadidos manualmente? Los sorteos del historial integrado no se eliminan.`))return;
+  if(j==='prim') state.allPrim=[];
+  else state.allEuro=[];
+  await saveLS();updateKPIs();refreshPrimQuick();refreshEuroQuick();renderHS();
+  toast(`✅ ${n} sorteos eliminados`);
+}
+
+// Estado del importador de histórico
+let _importQueue=[], _importType='', _importAdded=0, _importSkipped=0, _globalConflict=null;
+
+function importHistorico(evt){
+  const f=evt.target.files[0];
+  if(!f){return;}
+  const j=document.getElementById('hs-juego').value;
+  _importType=j;
+  _importAdded=0; _importSkipped=0; _importQueue=[]; _globalConflict=null;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const text=e.target.result.trim();
+      let rows=[];
+      // Intentar JSON
+      if(text.startsWith('[')||text.startsWith('{')){
+        const parsed=JSON.parse(text);
+        rows=Array.isArray(parsed)?parsed:[parsed];
+      } else {
+        // CSV: FECHA,NUMEROS,EXTRA (compl,reint para prim / estrellas para euro)
+        const lines=text.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('FECHA'));
+        lines.forEach(line=>{
+          const cols=line.split(',').map(c=>c.trim());
+          if(cols.length<2)return;
+          if(j==='prim'){
+            const fecha=cols[0];
+            const nums=cols.slice(1,7).map(Number).filter(n=>n>0);
+            const comp=parseInt(cols[7])||null;
+            const reint=parseInt(cols[8]);
+            if(fecha&&nums.length===6)rows.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
+          } else {
+            const fecha=cols[0];
+            const nums=cols.slice(1,6).map(Number).filter(n=>n>0);
+            const ests=cols.slice(6,8).map(Number).filter(n=>n>0);
+            if(fecha&&nums.length===5)rows.push({fecha,numeros:nums,estrellas:ests});
+          }
+        });
+      }
+      _importQueue=rows;
+      document.getElementById('import-hist-title').textContent='📥 Importar histórico — '+(_importType==='prim'?'Primitiva':'Euromillones');
+      document.getElementById('import-hist-modal').classList.add('show');
+      document.getElementById('import-hist-actions').style.display='none';
+      processImportQueue();
+    }catch(err){toast('Error leyendo archivo: '+err.message,'err');}
+  };
+  r.readAsText(f);
+  evt.target.value='';
+}
+
+function processImportQueue(){
+  const arr=_importType==='prim'?(state.allPrim||(state.allPrim=[])):(state.allEuro||(state.allEuro=[]));
+  const db=_importType==='prim'?getAllPrim():getAllEuro();
+  while(_importQueue.length>0){
+    const item=_importQueue[0];
+    const existsInExtra=arr.find(x=>x.fecha===item.fecha);
+    const existsInDB=db.find(x=>x.fecha===item.fecha)&&!existsInExtra;
+    if(existsInExtra){
+      // Conflicto con datos propios — preguntar (a menos que ya haya decisión global)
+      if(_globalConflict==='all-overwrite'){_importQueue.shift();doImport(item,arr,true);continue;}
+      if(_globalConflict==='all-skip'){_importQueue.shift();_importSkipped++;continue;}
+      // Mostrar diálogo
+      showImportConflict(item,arr);
+      return;
+    }
+    _importQueue.shift();
+    doImport(item,arr,false);
+  }
+  finishImport();
+}
+
+function showImportConflict(item,arr){
+  document.getElementById('import-hist-conflict').style.display='';
+  document.getElementById('import-conflict-fecha').textContent=item.fecha;
+  const existing=arr.find(x=>x.fecha===item.fecha);
+  const existNums=(existing?.numeros||[]).join(', ');
+  const newNums=(item.numeros||[]).join(', ');
+  document.getElementById('import-conflict-detail').innerHTML=
+    `<div>Existente: <b>${existNums}</b></div><div>Nuevo: <b>${newNums}</b></div>`;
+  document.getElementById('import-hist-body').textContent=`Conflicto de fecha. Añadidos: ${_importAdded} · Saltados: ${_importSkipped} · Pendientes: ${_importQueue.length}`;
+}
+
+function doImport(item,arr,overwrite){
+  if(overwrite){
+    const idx=arr.findIndex(x=>x.fecha===item.fecha);
+    if(idx>=0)arr.splice(idx,1);
+  }
+  // Normalizar
+  item.numeros=(item.numeros||[]).map(Number).filter(n=>n>0).sort((a,b)=>a-b);
+  if(_importType==='euro')item.estrellas=(item.estrellas||[]).map(Number).filter(n=>n>0).sort((a,b)=>a-b);
+  arr.push(item);
+  _importAdded++;
+}
+
+function resolveImportConflict(action){
+  const arr=_importType==='prim'?(state.allPrim||(state.allPrim=[])):(state.allEuro||(state.allEuro=[]));
+  const item=_importQueue.shift();
+  if(action==='all-overwrite'||action==='all-skip'){
+    _globalConflict=action;
+    if(action==='all-overwrite')doImport(item,arr,true);
+    else _importSkipped++;
+  } else if(action==='overwrite'){
+    doImport(item,arr,true);
+  } else {
+    _importSkipped++;
+  }
+  document.getElementById('import-hist-conflict').style.display='none';
+  processImportQueue();
+}
+
+async function finishImport(){
+  await saveLS();updateKPIs();refreshPrimQuick();refreshEuroQuick();renderHS();
+  document.getElementById('import-hist-conflict').style.display='none';
+  document.getElementById('import-hist-body').innerHTML=
+    `<span style="color:var(--green)">✅ Importación completada</span><br>Añadidos: <b>${_importAdded}</b> · Saltados: <b>${_importSkipped}</b>`;
+  document.getElementById('import-hist-actions').style.display='';
+}
+
+function closeImportModal(){
+  document.getElementById('import-hist-modal').classList.remove('show');
+}
+
 
 </script>
 
