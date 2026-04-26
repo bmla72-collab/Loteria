@@ -2316,24 +2316,44 @@ function importHistorico(evt){
       let rows=[];
       if(isXls){
         const wb=XLSX.read(e.target.result,{type:'array'});
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        const data=XLSX.utils.sheet_to_json(ws,{header:1});
-        // Skip header row if first cell looks like text
-        const start=isNaN(Date.parse(data[0]&&data[0][0]))?1:0;
-        data.slice(start).forEach(row=>{
-          if(!row||!row[0])return;
-          const fecha=String(row[0]).trim();
-          if(j==='prim'){
-            const nums=[row[1],row[2],row[3],row[4],row[5],row[6]].map(Number).filter(n=>n>0);
-            const comp=parseInt(row[7])||null;
-            const reint=parseInt(row[8]);
-            if(fecha&&nums.length===6)rows.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
-          } else {
-            const nums=[row[1],row[2],row[3],row[4],row[5]].map(Number).filter(n=>n>0);
-            const ests=[row[6],row[7]].map(Number).filter(n=>n>0);
-            if(fecha&&nums.length===5)rows.push({fecha,numeros:nums,estrellas:ests});
+        // Helper: convert Excel serial date to YYYY-MM-DD
+        function xlDate(v){
+          if(typeof v==='number'){
+            const d=new Date(Math.round((v-25569)*86400*1000));
+            const y=d.getUTCFullYear();
+            const m=String(d.getUTCMonth()+1).padStart(2,'0');
+            const dd=String(d.getUTCDate()).padStart(2,'0');
+            return `${y}-${m}-${dd}`;
           }
+          return String(v||'').trim();
+        }
+        // Read ALL data sheets (skip '.' info tab used by Lotoideas)
+        wb.SheetNames.forEach(sheetName=>{
+          if(sheetName==='.')return;
+          const data=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,raw:true});
+          data.forEach(row=>{
+            if(!row||!row[0])return;
+            const cell0=String(row[0]).trim().toUpperCase();
+            if(cell0==='FECHA'||cell0==='DATE'||cell0==='')return;
+            const fecha=xlDate(row[0]);
+            if(!fecha||fecha.length<8)return;
+            if(j==='prim'){
+              // Lotoideas: A=fecha, B-G=nums(6), H=comp, I=reint, J=joker
+              const nums=[row[1],row[2],row[3],row[4],row[5],row[6]].map(Number).filter(n=>n>0&&n<=49);
+              const comp=parseInt(row[7])||null;
+              const reint=parseInt(row[8]);
+              if(nums.length===6)rows.push({fecha,numeros:nums.sort((a,b)=>a-b),complementario:comp,reintegro:isNaN(reint)?null:reint});
+            } else {
+              // Lotoideas Euro: A=fecha, B-F=nums(5), G=vacío, H-I=estrellas
+              const nums=[row[1],row[2],row[3],row[4],row[5]].map(Number).filter(n=>n>0&&n<=50);
+              const ests=[row[7],row[8]].map(Number).filter(n=>n>0&&n<=12);
+              if(nums.length===5)rows.push({fecha,numeros:nums.sort((a,b)=>a-b),estrellas:ests.sort((a,b)=>a-b)});
+            }
+          });
         });
+        // Deduplicate by fecha (in case same dates across sheets)
+        const seen=new Set();
+        rows=rows.filter(r=>{if(seen.has(r.fecha))return false;seen.add(r.fecha);return true;});
       } else {
         const text=e.target.result.trim();
         if(text.startsWith('[')||text.startsWith('{')){
