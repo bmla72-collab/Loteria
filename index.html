@@ -374,6 +374,7 @@ input:focus, select:focus { border-color: var(--prim); }
   .rtable th, .rtable td { padding: 6px 7px; }
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -727,7 +728,7 @@ input:focus, select:focus { border-color: var(--prim); }
     <button class="btn btn-g" style="font-size:.8rem;padding:8px 12px" onclick="exportJSON()">💾 Backup</button>
     <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px">📂 Restaurar<input type="file" accept=".json" onchange="importJSON(event)" style="display:none"></label>
     <button class="btn btn-g" style="font-size:.8rem;padding:8px 12px" onclick="exportCSV()">📊 CSV</button>
-    <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px">📥 CSV<input type="file" accept=".csv" onchange="importCSV(event)" style="display:none"></label>
+    <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px">📥 CSV<input type="file" accept=".csv,.xlsx,.xls" onchange="importCSV(event)" style="display:none"></label>
     <button class="btn btn-danger" onclick="clearAll()">🗑</button>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
@@ -749,7 +750,7 @@ input:focus, select:focus { border-color: var(--prim); }
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
     <h2 style="font-family:'Oswald',sans-serif;font-size:1rem;flex:1">🗓️ Histórico de sorteos</h2>
     <label class="btn btn-g" style="cursor:pointer;font-size:.8rem;padding:8px 12px" title="Importar sorteos desde CSV">📥 Importar
-      <input type="file" accept=".csv,.json" onchange="importHistorico(event)" style="display:none">
+      <input type="file" accept=".csv,.json,.xlsx,.xls" onchange="importHistorico(event)" style="display:none">
     </label>
     <button class="btn btn-danger" style="font-size:.8rem;padding:8px 13px" onclick="clearHistorico()" title="Borrar sorteos añadidos manualmente">🗑 Borrar histórico</button>
   </div>
@@ -2151,59 +2152,76 @@ function exportCSV(){
 }
 function importCSV(evt){
   const f=evt.target.files[0];if(!f)return;
+  const isXls=f.name.match(/\.xlsx?$/i);
+  if(isXls){importCSVfromXlsx(f);evt.target.value='';return;}
   const r=new FileReader();
   r.onload=e=>{
     try{
-      const lines=e.target.result.split('\n').map(l=>l.trim()).filter(l=>l);
-      let section='combs';
-      let imported=0;
-      lines.forEach(line=>{
-        if(line.startsWith('SOTEOS_EXTRA_PRIMITIVA')){section='extraPrim';return;}
-        if(line.startsWith('SOTEOS_EXTRA_EUROMILLONES')){section='extraEuro';return;}
-        if(line.startsWith('TIPO,')||line.startsWith('FECHA,')||line==='')return;
-        const cols=line.match(/(".*?"|[^,]+)(?=,|$)/g)||[];
-        const clean=cols.map(c=>c.replace(/^"|"$/g,'').trim());
-        if(section==='combs'&&clean.length>=2){
-          const tipo=clean[0],name=clean[1];
-          const nums=(clean[2]||'').split(',').map(Number).filter(n=>n>0);
-          const extra=clean[3]||'';
-          if(tipo==='Primitiva'&&nums.length){
-            const reint=extra.startsWith('R:')?parseInt(extra.slice(2))||null:null;
-            if(!state.combsPrim.find(x=>x.numeros.join()==nums.join())){
-              state.combsPrim.push({id:Date.now()+Math.random(),name,numeros:nums,reintegro:reint,tipo:'simple',fecha:clean[4]||''});
-              imported++;
-            }
-          } else if(tipo==='Euromillones'&&nums.length){
-            const ests=extra.startsWith('E:')?extra.slice(2).split(',').map(Number).filter(n=>n>0):[];
-            if(!state.combsEuro.find(x=>x.numeros.join()==nums.join())){
-              state.combsEuro.push({id:Date.now()+Math.random(),name,numeros:nums,estrellas:ests,tipo:'simple',fecha:clean[4]||''});
-              imported++;
-            }
-          }
-        } else if(section==='extraPrim'&&clean.length>=2){
-          const fecha=clean[0],nums=clean[1].split(',').map(Number).filter(n=>n>0);
-          const comp=parseInt(clean[2])||null,reint=parseInt(clean[3]);
-          if(nums.length===6&&!getAllPrim().find(x=>x.fecha===fecha)){
-            if(!state.allPrim)state.allPrim=[];
-            state.allPrim.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
-            imported++;
-          }
-        } else if(section==='extraEuro'&&clean.length>=2){
-          const fecha=clean[0],nums=clean[1].split(',').map(Number).filter(n=>n>0);
-          const ests=(clean[2]||'').split(',').map(Number).filter(n=>n>0);
-          if(nums.length===5&&!getAllEuro().find(x=>x.fecha===fecha)){
-            if(!state.allEuro)state.allEuro=[];
-            state.allEuro.push({fecha,numeros:nums,estrellas:ests});
-            imported++;
-          }
-        }
-      });
-      saveLS();updateKPIs();refreshPrimQuick();refreshEuroQuick();
-      toast(`✅ CSV importado — ${imported} registros`);
+      processCsvText(e.target.result);
     }catch(err){toast('Error leyendo CSV: '+err.message,'err');}
   };
   r.readAsText(f);
   evt.target.value='';
+}
+function importCSVfromXlsx(f){
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const wb=XLSX.read(e.target.result,{type:'array'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+      const csv=XLSX.utils.sheet_to_csv(ws);
+      processCsvText(csv);
+    }catch(err){toast('Error leyendo Excel: '+err.message,'err');}
+  };
+  r.readAsArrayBuffer(f);
+}
+function processCsvText(text){
+  const lines=text.split('\n').map(l=>l.trim()).filter(l=>l);
+  let section='combs';
+  let imported=0;
+  lines.forEach(line=>{
+    if(line.startsWith('SOTEOS_EXTRA_PRIMITIVA')){section='extraPrim';return;}
+    if(line.startsWith('SOTEOS_EXTRA_EUROMILLONES')){section='extraEuro';return;}
+    if(line.startsWith('TIPO,')||line.startsWith('FECHA,')||line==='')return;
+    const cols=line.match(/(".*?"|[^,]+)(?=,|$)/g)||[];
+    const clean=cols.map(c=>c.replace(/^"|"$/g,'').trim());
+    if(section==='combs'&&clean.length>=2){
+      const tipo=clean[0],name=clean[1];
+      const nums=(clean[2]||'').split(',').map(Number).filter(n=>n>0);
+      const extra=clean[3]||'';
+      if(tipo==='Primitiva'&&nums.length){
+        const reint=extra.startsWith('R:')?parseInt(extra.slice(2))||null:null;
+        if(!state.combsPrim.find(x=>x.numeros.join()==nums.join())){
+          state.combsPrim.push({id:Date.now()+Math.random(),name,numeros:nums,reintegro:reint,tipo:'simple',fecha:clean[4]||''});
+          imported++;
+        }
+      } else if(tipo==='Euromillones'&&nums.length){
+        const ests=extra.startsWith('E:')?extra.slice(2).split(',').map(Number).filter(n=>n>0):[];
+        if(!state.combsEuro.find(x=>x.numeros.join()==nums.join())){
+          state.combsEuro.push({id:Date.now()+Math.random(),name,numeros:nums,estrellas:ests,tipo:'simple',fecha:clean[4]||''});
+          imported++;
+        }
+      }
+    } else if(section==='extraPrim'&&clean.length>=2){
+      const fecha=clean[0],nums=clean[1].split(',').map(Number).filter(n=>n>0);
+      const comp=parseInt(clean[2])||null,reint=parseInt(clean[3]);
+      if(nums.length===6&&!getAllPrim().find(x=>x.fecha===fecha)){
+        if(!state.allPrim)state.allPrim=[];
+        state.allPrim.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
+        imported++;
+      }
+    } else if(section==='extraEuro'&&clean.length>=2){
+      const fecha=clean[0],nums=clean[1].split(',').map(Number).filter(n=>n>0);
+      const ests=(clean[2]||'').split(',').map(Number).filter(n=>n>0);
+      if(nums.length===5&&!getAllEuro().find(x=>x.fecha===fecha)){
+        if(!state.allEuro)state.allEuro=[];
+        state.allEuro.push({fecha,numeros:nums,estrellas:ests});
+        imported++;
+      }
+    }
+  });
+  saveLS();updateKPIs();refreshPrimQuick();refreshEuroQuick();
+  toast(`✅ Importado — ${imported} registros`);
 }
 
 // ============================================================
@@ -2291,34 +2309,55 @@ function importHistorico(evt){
   const j=document.getElementById('hs-juego').value;
   _importType=j;
   _importAdded=0; _importSkipped=0; _importQueue=[]; _globalConflict=null;
+  const isXls=f.name.match(/\.xlsx?$/i);
   const r=new FileReader();
   r.onload=e=>{
     try{
-      const text=e.target.result.trim();
       let rows=[];
-      // Intentar JSON
-      if(text.startsWith('[')||text.startsWith('{')){
-        const parsed=JSON.parse(text);
-        rows=Array.isArray(parsed)?parsed:[parsed];
-      } else {
-        // CSV: FECHA,NUMEROS,EXTRA (compl,reint para prim / estrellas para euro)
-        const lines=text.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('FECHA'));
-        lines.forEach(line=>{
-          const cols=line.split(',').map(c=>c.trim());
-          if(cols.length<2)return;
+      if(isXls){
+        const wb=XLSX.read(e.target.result,{type:'array'});
+        const ws=wb.Sheets[wb.SheetNames[0]];
+        const data=XLSX.utils.sheet_to_json(ws,{header:1});
+        // Skip header row if first cell looks like text
+        const start=isNaN(Date.parse(data[0]&&data[0][0]))?1:0;
+        data.slice(start).forEach(row=>{
+          if(!row||!row[0])return;
+          const fecha=String(row[0]).trim();
           if(j==='prim'){
-            const fecha=cols[0];
-            const nums=cols.slice(1,7).map(Number).filter(n=>n>0);
-            const comp=parseInt(cols[7])||null;
-            const reint=parseInt(cols[8]);
+            const nums=[row[1],row[2],row[3],row[4],row[5],row[6]].map(Number).filter(n=>n>0);
+            const comp=parseInt(row[7])||null;
+            const reint=parseInt(row[8]);
             if(fecha&&nums.length===6)rows.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
           } else {
-            const fecha=cols[0];
-            const nums=cols.slice(1,6).map(Number).filter(n=>n>0);
-            const ests=cols.slice(6,8).map(Number).filter(n=>n>0);
+            const nums=[row[1],row[2],row[3],row[4],row[5]].map(Number).filter(n=>n>0);
+            const ests=[row[6],row[7]].map(Number).filter(n=>n>0);
             if(fecha&&nums.length===5)rows.push({fecha,numeros:nums,estrellas:ests});
           }
         });
+      } else {
+        const text=e.target.result.trim();
+        if(text.startsWith('[')||text.startsWith('{')){
+          const parsed=JSON.parse(text);
+          rows=Array.isArray(parsed)?parsed:[parsed];
+        } else {
+          const lines=text.split('\n').map(l=>l.trim()).filter(l=>l&&!l.startsWith('FECHA'));
+          lines.forEach(line=>{
+            const cols=line.split(',').map(c=>c.trim());
+            if(cols.length<2)return;
+            if(j==='prim'){
+              const fecha=cols[0];
+              const nums=cols.slice(1,7).map(Number).filter(n=>n>0);
+              const comp=parseInt(cols[7])||null;
+              const reint=parseInt(cols[8]);
+              if(fecha&&nums.length===6)rows.push({fecha,numeros:nums,complementario:comp,reintegro:isNaN(reint)?null:reint});
+            } else {
+              const fecha=cols[0];
+              const nums=cols.slice(1,6).map(Number).filter(n=>n>0);
+              const ests=cols.slice(6,8).map(Number).filter(n=>n>0);
+              if(fecha&&nums.length===5)rows.push({fecha,numeros:nums,estrellas:ests});
+            }
+          });
+        }
       }
       _importQueue=rows;
       document.getElementById('import-hist-title').textContent='📥 Importar histórico — '+(_importType==='prim'?'Primitiva':'Euromillones');
@@ -2327,7 +2366,8 @@ function importHistorico(evt){
       processImportQueue();
     }catch(err){toast('Error leyendo archivo: '+err.message,'err');}
   };
-  r.readAsText(f);
+  if(isXls) r.readAsArrayBuffer(f);
+  else r.readAsText(f);
   evt.target.value='';
 }
 
